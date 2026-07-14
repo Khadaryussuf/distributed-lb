@@ -5,6 +5,8 @@ services:
     ports:
       - "5000:5000"
     privileged: true
+    environment:
+      HASH_VARIANT: "original"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     networks:

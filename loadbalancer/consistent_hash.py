@@ -1,29 +1,32 @@
+import os
+
+
 class ConsistentHashMap:
-    def __init__(self, num_slots=512, num_virtual_servers=9):
+    def __init__(self, num_slots=512, num_virtual_servers=9, hash_variant=None):
         self.num_slots = num_slots
         self.num_virtual_servers = num_virtual_servers
         
-        # The circle itself: an array where each index is a "slot".
-        # None means empty. Otherwise, it holds the server's ID.
-        self.slots = [None] * num_slots
+        # hash_variant can be "original" or "improved".
+        # If not explicitly passed in, check environment variable, default to "original".
+        self.hash_variant = hash_variant or os.environ.get("HASH_VARIANT", "original")
         
-        # Keeps track of which slots belong to which server,
-        # so we can easily remove a server later.
+        self.slots = [None] * num_slots
         self.server_to_slots = {}
 
     def request_hash(self, request_id):
-        return (request_id**2 + 2*request_id + 17) % self.num_slots
+        if self.hash_variant == "improved":
+            return (request_id * 2654435761) % self.num_slots
+        else:
+            return (request_id**2 + 2*request_id + 17) % self.num_slots
 
     def virtual_server_hash(self, server_id, replica_id):
         i, j = server_id, replica_id
-        return (i**2 + j**2 + 2*j + 25) % self.num_slots
+        if self.hash_variant == "improved":
+            return ((i * 2654435761) + (j * 40503) + 17) % self.num_slots
+        else:
+            return (i**2 + j**2 + 2*j + 25) % self.num_slots
 
     def _find_empty_slot(self, preferred_slot):
-        """
-        Starting at preferred_slot, do linear probing:
-        check preferred_slot, preferred_slot+1, preferred_slot+2, ...
-        (wrapping around past 511 back to 0) until an empty slot is found.
-        """
         for offset in range(self.num_slots):
             candidate = (preferred_slot + offset) % self.num_slots
             if self.slots[candidate] is None:
@@ -31,10 +34,6 @@ class ConsistentHashMap:
         raise Exception("No empty slots available - hash map is full")
 
     def add_server(self, server_id):
-        """
-        Places K virtual copies of this server onto the circle.
-        Uses linear probing if a preferred slot is already taken.
-        """
         placed_slots = []
         for replica_id in range(self.num_virtual_servers):
             preferred_slot = self.virtual_server_hash(server_id, replica_id)
@@ -45,11 +44,8 @@ class ConsistentHashMap:
         self.server_to_slots[server_id] = placed_slots
 
     def remove_server(self, server_id):
-        """
-        Removes all virtual copies of this server from the circle.
-        """
         if server_id not in self.server_to_slots:
-            return  # server wasn't in the map, nothing to do
+            return
         
         for slot in self.server_to_slots[server_id]:
             self.slots[slot] = None
@@ -57,16 +53,12 @@ class ConsistentHashMap:
         del self.server_to_slots[server_id]
 
     def get_server(self, request_id):
-        """
-        Given a request ID, find which server should handle it:
-        hash the request, then walk clockwise until a server is found.
-        """
         preferred_slot = self.request_hash(request_id)
         for offset in range(self.num_slots):
             candidate = (preferred_slot + offset) % self.num_slots
             if self.slots[candidate] is not None:
                 return self.slots[candidate]
-        return None  # no servers in the map at all
+        return None
 
 
 if __name__ == "__main__":
