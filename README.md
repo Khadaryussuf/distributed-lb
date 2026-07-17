@@ -52,6 +52,61 @@ including automatic failure detection and recovery.
   treated as a failure (no retry/grace period), prioritizing fast recovery
   over tolerance of transient network blips.
 
+## Dependencies
+
+- Docker Desktop (v20.10.23+) with Docker Compose
+- Python 3.12+ (only needed if running analysis scripts outside Docker)
+- Python packages (installed automatically inside containers via
+  `requirements.txt` in each service folder): `flask`, `requests`, `docker`
+- For the analysis scripts (`analysis/`): `matplotlib` (install via
+  `pip install -r analysis/requirements.txt` in a virtual environment)
+
+## Installation
+
+1. Clone this repository:
+```bash
+git clone https://github.com/Khadaryussuf/distributed-lb.git
+cd distributed-lb
+```
+2. Ensure Docker Desktop is running.
+3. Run `make up` (see "How to Run" below).
+
+## How to Run
+
+```bash
+make up
+```
+
+This builds the server image and starts the load balancer, which
+automatically spawns N=3 server replicas. The load balancer is then
+reachable at `http://localhost:5000`.
+
+To stop and clean up all containers (including dynamically spawned ones):
+
+```bash
+make down
+make clean
+```
+
+## Testing
+
+Test scripts live in the `analysis/` folder and require Python 3.12+ with
+dependencies installed (`pip install -r analysis/requirements.txt`, ideally
+inside a virtual environment).
+
+With the system running (`make up` in another terminal), run:
+
+```bash
+cd analysis
+python load_test.py 50              # quick sanity check of routing
+python chart_a1.py                  # A-1: load distribution bar chart
+python chart_a2.py                  # A-2: scalability line chart
+python test_failure_recovery.py     # A-3: automated failure recovery test
+```
+
+Each script prints its results to the console, and the chart scripts also
+save `.png` output into the `analysis/` folder.
+
 ## Testing & Results (Task 4 Analysis)
 
 ### A-1: Request Distribution at N=3 (10,000 requests)
@@ -112,3 +167,61 @@ incremental verification of each.
 
 To investigate the A-1 imbalance, an alternative hash function set was
 implemented using multiplicative hashing:
+
+```
+H_new(i) = (i * 2654435761) % 512
+Φ_new(i,j) = ((i * 2654435761) + (j * 40503) + 17) % 512
+```
+
+**A-1 repeated with improved hash (N=3, 10,000 requests):**
+
+| Server | Requests Handled | % of Total |
+|--------|------------------|------------|
+| 1      | 3886             | 38.9%      |
+| 2      | 3887             | 38.9%      |
+| 3      | 2227             | 22.3%      |
+
+![A-1 Improved Bar Chart](analysis/a1_bar_chart_improved.png)
+
+**A-2 repeated with improved hash:**
+
+![A-2 Improved Line Chart](analysis/a2_line_chart_improved.png)
+
+**Observations**:
+- The improved multiplicative hash produces a *substantially* more balanced
+  distribution in A-1 (Servers 1 and 2 are nearly identical at ~39% each,
+  compared to the original's 84%/5%/11% split). This confirms that
+  multiplicative hashing scatters sequential integer inputs far more
+  uniformly than the original quadratic formula.
+- The A-2 results are nearly identical between the original and improved
+  hash functions. This makes sense: A-2 measures *average* load
+  (total requests ÷ N), which depends only on how many servers are present,
+  not on how evenly the hash function distributes requests *among* them.
+  Hash function quality affects *intra-N* balance (A-1), not the
+  *aggregate scaling trend* (A-2).
+
+## Project Structure
+
+```
+distributed-lb/
+├── server/                        # Task 1: server
+│   ├── app.py
+│   ├── Dockerfile
+│   └── requirements.txt
+├── loadbalancer/                  # Task 2 & 3: hashing + load balancer
+│   ├── consistent_hash.py
+│   ├── app.py
+│   ├── Dockerfile
+│   └── requirements.txt
+├── analysis/                      # Task 4: experiments
+│   ├── load_test.py
+│   ├── chart_a1.py
+│   ├── chart_a2.py
+│   ├── chart_a1_improved.py
+│   ├── chart_a2_improved.py
+│   ├── test_failure_recovery.py
+│   └── *.png (generated charts)
+├── docker-compose.yml
+├── Makefile
+└── README.md
+```
